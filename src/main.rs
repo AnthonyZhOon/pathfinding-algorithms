@@ -1,3 +1,4 @@
+use pathfinding::num_traits::PrimInt;
 use pathfinding::prelude::astar;
 use pathfinding::prelude::Grid;
 use plotters::coord::Shift;
@@ -11,7 +12,6 @@ fn plot_grid(
     path: Option<&Vec<(usize, usize)>>
 )-> Result<(), Box<dyn std::error::Error>>{
     let sub_areas = drawing_area.split_evenly((grid.width, grid.height));
-    let red = 150;
     const BLUE: plotters::style::RGBColor = RGBColor(59, 132, 227);
     for (idx, sub_area) in (0..).zip(sub_areas.iter()) {
         if grid.has_vertex((idx % grid.width, idx / grid.width)) {
@@ -41,11 +41,12 @@ fn random_grid(width: usize, height: usize, seed: u64) -> Grid {
     let mut grid = Grid::new(width, height);
     for x in 0..width {
         for y in 0..height {
-            if rng.gen_bool(0.76) {
+            if rng.gen_bool(0.2) {
                 grid.add_vertex((x, y));
             }
         }
     }
+    grid.invert();
     grid.enable_diagonal_mode();
     grid
 }
@@ -55,37 +56,71 @@ use plotters::style::full_palette::GREY_A200;
 use search_algorithms::bfs::bfs;
 use search_algorithms::dfs::dfs;
 use ndarray;
+use ndarray::Array;
+use ndarray::prelude::*;
 
-fn detect(ground: Grid, mut perceived: Grid, (x, y): (usize, usize), kernel: ndarray::Array2<bool>) {
+fn detect(ground: &Grid, perceived: &mut Grid, &(x, y): &(usize, usize), kernel: ndarray::Array2<bool>) {
     // The Kernel should be centred on the location
     // x - nrows//2 + i
     // y - ncols//2 + j
+    assert!(kernel.ncols() % 2 == 1, "Kernel has no middle column");
+    assert!(kernel.nrows() % 2 == 1, "Kernel has no middle row");
     for i in 0..kernel.nrows() {
         for j in 0..kernel.ncols() {
             if kernel[[i, j]] {
-                let row = x - kernel.nrows()/2 + i;
-                let col = y - kernel.ncols()/2 + j;
-                if row in  {
+                let col = x - kernel.nrows()/2 + i;
+                let row = y - kernel.ncols()/2 + j;
+                if (0..perceived.width).contains(&row) && (0..perceived.height).contains(&col)   {
                     match ground.has_vertex((row, col)) {
-                        true => ,
-                        false =>,
-                    }}
+                        true => perceived.add_vertex((row, col)),
+                        false => perceived.remove_vertex((row, col)),
+                    };}
             }
         }
     }
 }
 
+
+
+fn blur_to_prob(grid: &Grid) -> Array2<f64> {
+    // Consider multiple iterations of blurring
+    use convolve2d::*;
+    let arr = {
+        let mut tmp = vec![0.; grid.width*grid.height];
+        grid.iter().for_each(|(x, y)| tmp[x + y*grid.width] = 1.);
+        tmp
+    };
+    let base = DynamicMatrix::new(grid.width, grid.height, arr).unwrap();
+    let x: DynamicMatrix<f64> = convolve2d(&base, &DynamicMatrix::new(3, 3,
+                                                 vec![1./9.; 9]).unwrap());
+    ndarray::Array::from_shape_vec((grid.width, grid.height), x.get_data().into()).unwrap()
+}
+
+fn sample_prob_grid(probs: &Array2<f64>) -> Grid {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let mut grid = Grid::new(probs.nrows(), probs.ncols());
+    for row in 0..probs.nrows(){
+        for col in 0..probs.ncols() {
+
+            if rng.gen_bool(probs.row(row)[col].min(1.)) {
+                grid.add_vertex((row, col));
+            }
+        }
+    }
+    grid
+}
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     use rand::Rng;
-    let grid = random_grid(100, 100, 131);
+    let grid = random_grid(100, 100, 139);
     let mut rng = rand::thread_rng();
     let goal = grid.iter().nth(rng.gen_range(0..grid.vertices_len())).unwrap();
     let start = grid.iter().nth(rng.gen_range(0..grid.vertices_len())).unwrap();
     let successors_weighted = |p: &(usize, usize)| grid.neighbours(*p).iter().map(|&p| (p, 1)).collect::<Vec<_>>();
     let mut successors = |p: &(usize, usize)| grid.neighbours(*p);
     let mut success = |p: &(usize, usize)| *p == goal;
-    let mut heuristic = |p| grid.distance(*p, goal);
+    let mut heuristic = |p: &(usize, usize)| grid.distance(*p, goal);
     let result_astar:Option<(Vec<(usize, usize)>, usize)>  = astar(
                         &start,
                          successors_weighted,
@@ -105,22 +140,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Replan either every step or when encountering newly perceived terrain/lack of
     // 
     // Run the simulation
-    let mut current = start.clone();
-    let guess = random_grid(100, 100, 2);
+    let mut current = start;
+    let mut guess = random_grid(100, 100, 2);
+    let mut island = Grid::new(3,3);
+    island.add_vertex((1,1));
+    let mut prob = blur_to_prob(&grid);
+
+    // save_result(None, island, (0,0), (2,2), "island.png", "1");
+    let mut sampled_guess = sample_prob_grid(&prob); 
+    // for i in 0..10 {
+    //     save_result(None, sample_prob_grid(&prob), (0,0), (0,0), &format!("island_sample{i}.png"), &format!("Island {i}"));
+    // }
+    save_result(None, sampled_guess.clone(), (0,0), (0, 0), "sampled.png", "sample");
+
+    guess.add_vertex(goal);
+    guess.add_vertex(start);
     let mut steps: usize = 0;
     while !success(&current) {
-        let guess_astar = astar(&start, successors_weighted, heuristic, |p| *p == goal);
+        let guess_astar = astar(&current, |&n| guess.neighbours(n).iter().map(|&p| (p, 1)).collect::<Vec<_>>(), |&n| guess.distance(current, goal), |p| *p == goal);
 
         match guess_astar {
-            Some((path, _cost)) => {save_result(Some(path), guess.clone(), start, goal, "astar.png", &format!("Guessed path {steps}"))?;
-                                                                current = path.first().unwrap().clone()},
-            None => {save_result(None, guess.clone(), start, goal, "astar.png", &format!("Guessed path {steps} (impossible)"))?; break},
+            Some((path, _cost)) => {save_result(Some(path.clone()), guess.clone(), start, goal, &format!("astar_{steps}.png"), &format!("Guessed path {steps}"))?;
+                                                                current = *path.iter().take(2).last().unwrap()},
+            None => {save_result(None, guess.clone(), start, goal, &format!("astar_{steps}.png"), &format!("Guessed path {steps} (impossible)"))?; break},
         }
         // Take 1 step and update position and visible graph
-        
+        detect(&grid, &mut guess, &current, ndarray::Array::from_elem((11,11), true));
+
         steps += 1;
     }
-
+    println!("Done");
     
                 
     // let result_bfs: Option<Vec<(usize, usize)>> = bfs(start, &mut successors, &mut success);
@@ -182,134 +231,6 @@ mod safe_interval_astar {
     }
 
     
-
-}
-
-mod safe_interval_path_planning {
-    use pathfinding::prelude::Grid;
-    use std::collections::HashMap;
-    type Node = (usize, usize);
-    type Time = usize;
-    type NodeWithInterval = (Node, usize, Time);
-    #[derive(Clone)]
-    struct Cfg(Node, usize, Time);
-    type Interval = (Time, Time);
-    type Heuristic = usize;
-    /// Time is discretised to and uses f64
-    /// Locations are nodes and is kept as a grid and uses (usize, usize)
-    /// The OPEN set contains nodes with intervals, a unique state is a tuple describing location, interval i and arrival time t
-    /// with heuristic + distance estimate as the score
-    /// The Expanded set contains the fully relaxed nodes with g(s) finalised for each state of (location, interval, time)
-    /// 
-    enum DynamicEnvironment {
-        Static(Grid),
-        SafeIntervals((Grid, HashMap<Node,(Heuristic, Vec<Interval>)>)),
-    }
-    type TimedPath = Vec<NodeWithInterval>;
-
-    fn sipp<FN, FH, FS, IN>(start: &Node,mut successors: FN,mut heuristic: FH,mut success: FS) -> Option<(TimedPath, Time)>
-    where 
-        FN: FnMut(&Node) -> IN,
-        FH: FnMut(&Node) -> Time,
-        FS: FnMut(&Node) -> bool,
-        IN: IntoIterator<Item = NodeWithInterval>,
-    {
-        let result = sipp_core(start,&mut successors,&mut heuristic, &mut success);
-        None
-    }
-    use slotmap::SlotMap;
-    use slotmap::new_key_type;
-    use std::collections::BinaryHeap;
-    
-    new_key_type! {struct NodeKey;}
-    fn sipp_core<FN, FH, FS, IN>(start: &Node, successors: &mut FN, heuristic: &mut FH,success: &mut FS) -> Option<(Vec<Cfg>, Time)>
-    where
-        FN: FnMut(&Node) -> IN,
-        FH: FnMut(&Node) -> Time,
-        FS: FnMut(&Node) -> bool,
-        IN: IntoIterator<Item = NodeWithInterval>,
-    {
-        
-        let mut to_see = BinaryHeap::new();
-        let mut parents: SlotMap<slotmap::DefaultKey, (slotmap::DefaultKey, Cfg)>  = SlotMap::new();
-        {
-        let start_key = parents.insert_with_key(|k| (k, Cfg(start.clone(), 0, 0)));
-        to_see.push( SmallestCostHolder{
-            estimated_cost: 0,
-            cost: 0,
-            key: start_key,
-        });
-        }
-        while let Some(SmallestCostHolder{cost, key, ..}) = to_see.pop() {
-            let successors = {
-                let &(final_key, Cfg(node, _interval, arrival_time)) = parents.get(key).unwrap(); // Cannot fail
-                if success(&node) {
-                    let path = reverse_path(&parents, |&key| key, final_key);
-                    return Some((path, arrival_time));
-                }
-                if cost > arrival_time {
-                    continue;
-                }
-                successors(&node)
-            };
-            for (successor,interval, move_cost) in successors {
-
-            }
-        }
-        None
-    }
-
-
-    #[allow(clippy::needless_collect)]
-    fn reverse_path<K, V, F>(parents: &SlotMap<K, (K, V)>, mut parent: F, start: K ) -> Vec<V>
-    where
-        K: slotmap::Key,
-        F: FnMut(&K) -> K,
-        V: Clone,
-    {
-        let mut i = start;
-        let path = std::iter::from_fn(|| {
-            parents.get(i).map(|(key, cfg)| {
-                i = parent(key);
-                cfg
-            })
-        })
-        .collect::<Vec<&V>>();
-        // Collecting the going through the vector is needed to revert the path because the
-        // unfold iterator is not double-ended due to its iterative nature.
-        path.into_iter().rev().cloned().collect()
-    }
-
-    struct SmallestCostHolder<C, K> {
-        estimated_cost: C,
-        cost: C,
-        key: K,
-    }
-
-    use std::cmp::Ordering;
-
-    impl<C: PartialEq, K> PartialEq for SmallestCostHolder<C, K> {
-        fn eq(&self, other: &Self) -> bool {
-            self.estimated_cost.eq(&other.estimated_cost) && self.cost.eq(&other.cost)
-        }
-    }
-
-    impl<C: PartialEq, K> Eq for SmallestCostHolder<C, K> {}
-
-    impl<C: Ord, K> PartialOrd for SmallestCostHolder<C, K> {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            Some(self.cmp(other))
-        }
-    }
-
-    impl<C: Ord, K> Ord for SmallestCostHolder<C, K> {
-        fn cmp(&self, other: &Self) -> Ordering {
-            match other.estimated_cost.cmp(&self.estimated_cost) {
-                Ordering::Equal => self.cost.cmp(&other.cost),
-                s => s,
-            }
-        }
-}
 
 }
 
