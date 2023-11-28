@@ -151,7 +151,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // for i in 0..10 {
     //     save_result(None, sample_prob_grid(&prob), (0,0), (0,0), &format!("island_sample{i}.png"), &format!("Island {i}"));
     // }
-    save_result(None, sampled_guess.clone(), (0,0), (0, 0), "sampled.png", "sample");
+    let mut guess = sampled_guess.clone();
+    let _ = save_result(None, sampled_guess.clone(), (0,0), (0, 0), "sampled.png", "sample");
 
     guess.add_vertex(goal);
     guess.add_vertex(start);
