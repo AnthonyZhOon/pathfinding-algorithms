@@ -11,24 +11,39 @@ fn plot_grid(
     goal: &(usize, usize),
     path: Option<&Vec<(usize, usize)>>
 )-> Result<(), Box<dyn std::error::Error>>{
-    let sub_areas = drawing_area.split_evenly((grid.width, grid.height));
+    let sub_areas = drawing_area.split_evenly((grid.height, grid.width));
     const BLUE: plotters::style::RGBColor = RGBColor(59, 132, 227);
-    for (idx, sub_area) in (0..).zip(sub_areas.iter()) {
-        if grid.has_vertex((idx % grid.width, idx / grid.width)) {
-            sub_area.fill(&WHITE)?;
-            // sub_area.titled(&idx.to_string(), ("sans-serif", 30))?;
-        } else {
-            sub_area.fill(&GREY_A200)?;
-        }
-    }
+    let mut idx: usize = 0;
+    (0..grid.height).for_each(|y| {
+        (0..grid.width).for_each(|x| {
+            if grid.has_vertex((x, y)) {
+                let _ = sub_areas[idx].fill(&WHITE);
+                let _ = sub_areas[idx].titled(&format!("{idx}"), ("sans-serif", 12));
+            } else {
+                let _ = sub_areas[idx].fill(&GREY_A200);
+                let _ = sub_areas[idx].titled(&format!("{idx}"), ("sans-serif", 12));
+            }
+            idx += 1;
+            // println!("{row}, {col}");
+        })
+        
+    });
+    // for (idx, sub_area) in sub_areas.iter().enumerate() {
+    //     if grid.has_vertex((idx % grid.width, idx / grid.width)) {
+    //         sub_area.fill(&WHITE)?;
+    //         // sub_area.titled(&idx.to_string(), ("sans-serif", 30))?;
+    //     } else {
+    //         sub_area.fill(&GREY_A200)?;
+    //     }
+    // }
     if let Some(path) = path {
         for &(x, y) in path {
-            sub_areas[x*grid.width + y].fill(&BLUE)?;
+            sub_areas[y*grid.width + x].fill(&BLUE)?;
         }
     }
     
-    sub_areas[start.0*grid.width+start.1].fill(&GREEN)?;
-    sub_areas[goal.0*grid.width+goal.1].fill(&RED)?;
+    sub_areas[start.1*grid.width+start.0].fill(&GREEN)?;
+    sub_areas[goal.1*grid.width+goal.0].fill(&RED)?;
     // println!("{:?}", path);
 
     Ok(())
@@ -58,6 +73,8 @@ use search_algorithms::dfs::dfs;
 use ndarray;
 use ndarray::Array;
 use ndarray::prelude::*;
+
+use crate::map_loader::read_map;
 
 fn detect(ground: &Grid, perceived: &mut Grid, &(x, y): &(usize, usize), kernel: ndarray::Array2<bool>) {
     // The Kernel should be centred on the location
@@ -113,14 +130,14 @@ fn sample_prob_grid(probs: &Array2<f64>) -> Grid {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     use rand::Rng;
-    let grid = random_grid(100, 100, 139);
+    // let grid = random_grid(100, 100, 139);
+    let grid = read_map("maps/warehouse_small.map");
     let mut rng = rand::thread_rng();
     let goal = grid.iter().nth(rng.gen_range(0..grid.vertices_len())).unwrap();
     let start = grid.iter().nth(rng.gen_range(0..grid.vertices_len())).unwrap();
     let successors_weighted = |p: &(usize, usize)| grid.neighbours(*p).iter().map(|&p| (p, 1)).collect::<Vec<_>>();
-    let mut successors = |p: &(usize, usize)| grid.neighbours(*p);
-    let mut success = |p: &(usize, usize)| *p == goal;
-    let mut heuristic = |p: &(usize, usize)| grid.distance(*p, goal);
+    let success = |p: &(usize, usize)| *p == goal;
+    let heuristic = |p: &(usize, usize)| grid.distance(*p, goal);
     let result_astar:Option<(Vec<(usize, usize)>, usize)>  = astar(
                         &start,
                          successors_weighted,
@@ -141,13 +158,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 
     // Run the simulation
     let mut current = start;
-    let mut guess = random_grid(100, 100, 2);
-    let mut island = Grid::new(3,3);
-    island.add_vertex((1,1));
+
     let mut prob = blur_to_prob(&grid);
 
     // save_result(None, island, (0,0), (2,2), "island.png", "1");
-    let mut sampled_guess = sample_prob_grid(&prob); 
+    let sampled_guess = sample_prob_grid(&prob); 
     // for i in 0..10 {
     //     save_result(None, sample_prob_grid(&prob), (0,0), (0,0), &format!("island_sample{i}.png"), &format!("Island {i}"));
     // }
@@ -158,6 +173,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     guess.add_vertex(start);
     let mut steps: usize = 0;
     while !success(&current) {
+        // TODO:
+        // Detect can update the underlying probability map (measure and predict cycles)
+        // Visualise nicer, side-by-side with ground truth, show "fog of war", show heatmap of probabilities
+        // Visualise taken trajectory
+        // Create maps from files, taken from warthog?
+        // Detect can see through walls currently??
+        
+
         let guess_astar = astar(&current, |&n| guess.neighbours(n).iter().map(|&p| (p, 1)).collect::<Vec<_>>(), |&n| guess.distance(current, goal), |p| *p == goal);
 
         match guess_astar {
@@ -172,7 +195,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("Done");
     
-                
+    // save_result(None, map_loader::read_map("maps/warehouse_small.map"), (0, 0), (0, 0), "warehouse.png", "warehouse small");
     // let result_bfs: Option<Vec<(usize, usize)>> = bfs(start, &mut successors, &mut success);
 
     // match result_bfs {
@@ -235,3 +258,4 @@ mod safe_interval_astar {
 
 }
 
+mod map_loader;
