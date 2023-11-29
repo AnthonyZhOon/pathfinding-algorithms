@@ -13,8 +13,8 @@ fn read_line(lines: &mut core::str::Split<'_, char>) -> String {
 pub fn read_map(path: &str) -> Grid {
     // Expects to read a .map file
     let mut text = String::new();
-    let mut file = File::open(path).expect(&format!("File not found at {path}"));
-    file.read_to_string(&mut text);
+    let mut file = File::open(path).unwrap_or_else(|e| panic!("Failed to open file at {path}"));
+    file.read_to_string(&mut text).expect("Failed to read file to string");
     let mut file = text.split('\n');
 
     
