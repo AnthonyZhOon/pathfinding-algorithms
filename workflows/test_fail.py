@@ -1,2 +1,3 @@
 import sys
-sys.exit(1)
+if True:
+  sys.exit(1)
