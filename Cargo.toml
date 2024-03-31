@@ -13,6 +13,4 @@ rand_chacha = "0.3.1"
 slotmap = "1.0.6"
 indexmap = "2.1.0"
 ndarray = "0.15.6"
-ndarray-conv = "0.2.0"
-convolve2d = "0.1.0"
-scilib = "1.0.0"
+
