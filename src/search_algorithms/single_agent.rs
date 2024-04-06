@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod bfs {
     use std::collections::{HashMap, VecDeque};
     use std::hash::Hash;
@@ -100,7 +98,7 @@ pub mod bfs {
     }
 }
 
-mod dfs {
+pub mod dfs {
     use std::collections::HashSet;
     use std::hash::Hash;
 
@@ -163,7 +161,7 @@ mod dfs {
     }
 }
 
-mod djikstra {
+pub mod djikstra {
     use std::cmp::Ordering;
     use std::collections::hash_map::Entry;
     use std::collections::{BinaryHeap, HashMap};
@@ -317,6 +315,7 @@ mod djikstra {
     }
 }
 
+#[allow(unused)]
 mod safe_interval {
     use crate::map_gen::random_grid;
     use pathfinding::prelude::Grid;
